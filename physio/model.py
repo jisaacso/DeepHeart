@@ -18,11 +18,11 @@ class CNN:
 
     def train(self):
 
-        saver = tf.train.Saver()
+        # saver = tf.train.Saver()
 
-        X = tf.placeholder(tf.float32, [None, self.d_input])
-        y = tf.placeholder(tf.float32, [None, self.nclasses])
-        do_drop = tf.placeholder(tf.float32)
+        X = tf.placeholder(tf.float32, [None, self.d_input], name='X')
+        y = tf.placeholder(tf.float32, [None, self.nclasses], name='y')
+        do_drop = tf.placeholder(tf.float32, name='drop')
 
         weights = {
             'wc1': tf.Variable(tf.random_normal([5, 1, 1, 32])),
@@ -39,7 +39,6 @@ class CNN:
             'out': tf.Variable(tf.random_normal([self.nclasses]))
         }
 
-
         pred = self.model1D(X, weights, biases, do_drop)
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, y, name='cost'))
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(cost)
@@ -47,8 +46,21 @@ class CNN:
         is_correct = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
-        init = tf.initialize_all_variables()
+        dim = tf.shape(y)[0]
+        # sensitivity = correctly predicted abnormal / total number of actual abnormal
+        abnormal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 1), tf.float32)
+        pred1d = tf.reshape(tf.slice(y, [0, 1], [dim, 1]), [-1])
+        abn = tf.mul(pred1d, abnormal_idxs)
+        sensitivity = tf.reduce_sum(abn) / tf.reduce_sum(pred1d)
 
+        # specificity = correctly predicted normal / total number of actual normal
+        normal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 0), tf.float32)
+        pred1d_n = tf.reshape(tf.slice(y, [0, 0], [dim, 1]), [-1])
+        normal = tf.mul(pred1d_n, normal_idxs)
+        specificity = tf.reduce_sum(normal) / tf.reduce_sum(pred1d_n)
+
+
+        init = tf.initialize_all_variables()
         with tf.Session() as sess:
             sess.run(init)
             for epoch in range(self.epochs):
@@ -61,10 +73,20 @@ class CNN:
                 avg_cost /= float(self.nbatches * 9)
                 print 'Epoch %s\tcost %s' % (epoch, avg_cost)
 
-            print 'Accuracy %s' % (sess.run(accuracy, {X: self.pcg.test.X,
+                print 'Accuracy %s' % (sess.run(accuracy, {X: self.pcg.test.X,
+                                                           y: self.pcg.test.y,
+                                                           do_drop: 1.}))
+
+                print 'Sensitivity %s' % (sess.run(sensitivity,
+                                          {X: self.pcg.test.X,
+                                           y: self.pcg.test.y,
+                                           do_drop: 1.}))
+                print 'Specificity %s' % (sess.run(specificity,
+                                                      {X: self.pcg.test.X,
                                                        y: self.pcg.test.y,
                                                        do_drop: 1.}))
-            saver.save(sess, self.model_path)
+            # saver.save(sess, self.model_path)
+
 
     def conv2d(self, x, w, b, strides=1):
         x = tf.nn.conv2d(x, w, strides=[1, strides, strides, 1], padding="SAME")
@@ -76,9 +98,11 @@ class CNN:
 
         conv1 = self.conv2d(x, weights['wc1'], biases['bc1'])
         conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding='SAME')
+        conv1 = tf.nn.relu(conv1)
 
         conv2 = self.conv2d(conv1, weights['wc2'], biases['bc2'])
         conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding="SAME")
+        conv2 = tf.nn.relu(conv2)
 
         d_layer1 = weights['wd1'].get_shape().as_list()[0]
         fc1 = tf.reshape(conv2, [-1, d_layer1])
@@ -88,7 +112,6 @@ class CNN:
 
         out = tf.add(tf.matmul(fc1, weights['out']), biases['out'])
         return out
-
 
     def model1DSplits(self, x, weights, biases, dropout):
         """
@@ -102,9 +125,11 @@ class CNN:
 
         conv1 = self.conv2d(x, weights['wc1'], biases['bc1'])
         conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding='SAME')
+        conv1 = tf.nn.relu(conv1)
 
         conv2 = self.conv2d(conv1, weights['wc2'], biases['bc2'])
         conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding="SAME")
+        conv2 = tf.nn.relu(conv2)
 
         d_layer1 = weights['wd1'].get_shape().as_list()[0]
         fc1 = tf.reshape(conv2, [-1, d_layer1])
