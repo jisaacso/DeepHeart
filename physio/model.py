@@ -1,11 +1,12 @@
 import tensorflow as tf
 import numpy as np
 import os
+from datetime import datetime
 
 
 class CNN:
     def __init__(self, pcg, nclasses=2, learning_rate=0.001,
-                 epochs=5, batch_size=100, dropout=0.75, model_name="cnn.tnfl"):
+                 epochs=5, batch_size=100, dropout=0.75, model_name="cnn"):
         self.pcg = pcg
         self.nclasses = nclasses
         self.d_input = self.pcg.train.X.shape[1]
@@ -14,79 +15,102 @@ class CNN:
         self.batch_size = batch_size
         self.dropout = dropout
         self.nbatches = int(self.pcg.train.X.shape[0] / float(self.batch_size))
-        self.model_path = os.path.join("/Users/jisaacso/projects/physio/data/", model_name)
+        self.model_name = model_name
+        self.base_dir = "/Users/jisaacso/projects/physio/data/"
 
     def train(self):
+        print('begin train')
+        print(self.__get_output_name())
 
-        # saver = tf.train.Saver()
+        with tf.name_scope('input'):
+            X = tf.placeholder(tf.float32, [None, self.d_input], name='X')
+            y = tf.placeholder(tf.float32, [None, self.nclasses], name='y')
+            do_drop = tf.placeholder(tf.float32, name='drop')
 
-        X = tf.placeholder(tf.float32, [None, self.d_input], name='X')
-        y = tf.placeholder(tf.float32, [None, self.nclasses], name='y')
-        do_drop = tf.placeholder(tf.float32, name='drop')
+        with tf.name_scope('weights'):
+            weights = {
+                'wc1': tf.Variable(tf.random_normal([5, 1, 1, 32]), name='wc1'),
+                'wc2': tf.Variable(tf.random_normal([5, 1, 32, 64]), name='wc2'),
+                # 2 Max pools have taken original 10612 signal down to
+                # 5306 --> 2653. Each max pool has a ksize=2.
+                # 'wd1': tf.Variable(tf.random_normal([2653 * 1 * 64, 1024])),
+                'wd1': tf.Variable(tf.random_normal([int(self.d_input / 4) * 1 * 64, 1024]), name='wd1'),
+                'out': tf.Variable(tf.random_normal([1024, self.nclasses]), name='outW')
+            }
+        with tf.name_scope('biases'):
+            biases = {
+                'bc1': tf.Variable(tf.random_normal([32]), name='bc1'),
+                'bc2': tf.Variable(tf.random_normal([64]), name='bc2'),
+                'bd1': tf.Variable(tf.random_normal([1024]), name='bd1'),
+                'out': tf.Variable(tf.random_normal([self.nclasses]), name='outB')
+            }
 
-        weights = {
-            'wc1': tf.Variable(tf.random_normal([5, 1, 1, 32])),
-            'wc2': tf.Variable(tf.random_normal([5, 1, 32, 64])),
-            # 2 Max pools have taken original 10612 signal down to
-            # 5306 --> 2653. Each max pool has a ksize=2.
-            'wd1': tf.Variable(tf.random_normal([2653 * 1 * 64, 1024])),
-            'out': tf.Variable(tf.random_normal([1024, self.nclasses]))
-        }
-        biases = {
-            'bc1': tf.Variable(tf.random_normal([32])),
-            'bc2': tf.Variable(tf.random_normal([64])),
-            'bd1': tf.Variable(tf.random_normal([1024])),
-            'out': tf.Variable(tf.random_normal([self.nclasses]))
-        }
+        with tf.name_scope('pred'):
+            pred = self.model1D(X, weights, biases, do_drop)
 
-        pred = self.model1D(X, weights, biases, do_drop)
-        cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, y, name='cost'))
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(cost)
-
-        is_correct = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))
-        accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
+        with tf.name_scope('cost'):
+            cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, y, name='cost'))
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(cost)
 
         dim = tf.shape(y)[0]
-        # sensitivity = correctly predicted abnormal / total number of actual abnormal
-        abnormal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 1), tf.float32)
-        pred1d = tf.reshape(tf.slice(y, [0, 1], [dim, 1]), [-1])
-        abn = tf.mul(pred1d, abnormal_idxs)
-        sensitivity = tf.reduce_sum(abn) / tf.reduce_sum(pred1d)
 
-        # specificity = correctly predicted normal / total number of actual normal
-        normal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 0), tf.float32)
-        pred1d_n = tf.reshape(tf.slice(y, [0, 0], [dim, 1]), [-1])
-        normal = tf.mul(pred1d_n, normal_idxs)
-        specificity = tf.reduce_sum(normal) / tf.reduce_sum(pred1d_n)
+        with tf.name_scope('sensitivity'):
+            # sensitivity = correctly predicted abnormal / total number of actual abnormal
+            abnormal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 1), tf.float32)
+            pred1d = tf.reshape(tf.slice(y, [0, 1], [dim, 1]), [-1])
+            abn = tf.mul(pred1d, abnormal_idxs)
+            sensitivity = tf.reduce_sum(abn) / tf.reduce_sum(pred1d)
+            tf.scalar_summary('sensitivity', sensitivity)
 
+        with tf.name_scope('sensitivity'):
+            # specificity = correctly predicted normal / total number of actual normal
+            normal_idxs = tf.cast(tf.equal(tf.argmax(pred, 1), 0), tf.float32)
+            pred1d_n = tf.reshape(tf.slice(y, [0, 0], [dim, 1]), [-1])
+            normal = tf.mul(pred1d_n, normal_idxs)
+            specificity = tf.reduce_sum(normal) / tf.reduce_sum(pred1d_n)
+            tf.scalar_summary('sensitivity', sensitivity)
+
+        # Physionet score is the mean of sensitivity and specificity
+        score = (sensitivity + specificity) / 2.0
+        tf.scalar_summary('score', score)
 
         init = tf.initialize_all_variables()
+
+        saver = tf.train.Saver()
         with tf.Session() as sess:
             sess.run(init)
+
+            merged = tf.merge_all_summaries()
+            train_writer = tf.train.SummaryWriter(os.path.join(self.base_dir, 'train'), sess.graph)
+            test_writer = tf.test.SummaryWriter(os.path.join(self.base_dir, 'test'))
+
             for epoch in range(self.epochs):
                 avg_cost = 0
                 for batch in range(self.nbatches):
                     batch_x, batch_y = self.pcg.get_mini_batch(self.batch_size)
-                    _, c = sess.run([optimizer, cost], feed_dict={X: batch_x, y: batch_y,
-                                                                  do_drop: self.dropout})
+                    summary, _, c = sess.run([merged, optimizer, cost],
+                                             feed_dict={X: batch_x, y: batch_y,
+                                                        do_drop: self.dropout})
+                    train_writer.add_summary(summary, epoch*batch)
                     avg_cost += c
-                avg_cost /= float(self.nbatches * 9)
-                print 'Epoch %s\tcost %s' % (epoch, avg_cost)
+                avg_cost /= float(self.nbatches)
+                print('Epoch %s\tcost %s' % (epoch, avg_cost))
 
-                print 'Accuracy %s' % (sess.run(accuracy, {X: self.pcg.test.X,
-                                                           y: self.pcg.test.y,
-                                                           do_drop: 1.}))
+                if epoch % 2 == 0:
+                    acc, sens, spec = (sess.run([score, sensitivity, specificity],
+                                                {X: self.pcg.test.X,
+                                                 y: self.pcg.test.y,
+                                                 do_drop: 1.}))
+                    print('Score %s\tSensitivity %s\tSpecificity %s' % (acc, sens, spec))
 
-                print 'Sensitivity %s' % (sess.run(sensitivity,
-                                          {X: self.pcg.test.X,
-                                           y: self.pcg.test.y,
-                                           do_drop: 1.}))
-                print 'Specificity %s' % (sess.run(specificity,
-                                                      {X: self.pcg.test.X,
-                                                       y: self.pcg.test.y,
-                                                       do_drop: 1.}))
-            # saver.save(sess, self.model_path)
+                    saver.save(sess, self.__get_output_name())
+                    print('Epoch written')
 
+    def __get_output_name(self):
+        now = datetime.now()
+        time_str = "-%s" % (now.date())  # now.hour, now.minute, now.second)
+        model_path = os.path.join(self.base_dir, self.model_name + time_str + '.tnfl')
+        return model_path
 
     def conv2d(self, x, w, b, strides=1):
         x = tf.nn.conv2d(x, w, strides=[1, strides, strides, 1], padding="SAME")
@@ -94,48 +118,44 @@ class CNN:
         return tf.nn.relu(x)
 
     def model1D(self, x, weights, biases, dropout):
-        x = tf.reshape(x, shape=[-1, 10611, 1, 1])  # [n_images, width, height, n_channels]
-
-        conv1 = self.conv2d(x, weights['wc1'], biases['bc1'])
-        conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding='SAME')
-        conv1 = tf.nn.relu(conv1)
-
-        conv2 = self.conv2d(conv1, weights['wc2'], biases['bc2'])
-        conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding="SAME")
-        conv2 = tf.nn.relu(conv2)
-
-        d_layer1 = weights['wd1'].get_shape().as_list()[0]
-        fc1 = tf.reshape(conv2, [-1, d_layer1])
-        fc1 = tf.add(tf.matmul(fc1, weights['wd1']), biases['bd1'])
-        fc1 = tf.nn.relu(fc1)
-        fc1 = tf.nn.dropout(fc1, dropout)
-
-        out = tf.add(tf.matmul(fc1, weights['out']), biases['out'])
-        return out
-
-    def model1DSplits(self, x, weights, biases, dropout):
         """
-                            splits = np.linspace(0, batch_x.shape[1], 10)
-                    for s_idx in range(len(splits)-1):
-                        split = batch_x[:, splits[s_idx]:splits[s_idx+1]]
+        A Wrapper to chain several TensorFlow convolutional units together. This 1D model
+        ultimately calls TensorFlow's conv2d with 1D features.
+        Parameters
+        ----------
+        x: tensorflow.placeholder
+        A feature vector of size [None, no_features]
+
+        weights: dict<str, tensorflow.Variable>
+        Dictionary of Unknown weights to learn
+
+        biases
+        dropout
+
+        Returns
+        -------
 
         """
 
-        x = tf.reshape(x, shape=[-1, 10611, 1, 1])  # [n_images, width, height, n_channels]
+        with tf.name_scope('reshape'):
+            x = tf.reshape(x, shape=[-1, self.d_input, 1, 1])  # [n_images, width, height, n_channels]
 
-        conv1 = self.conv2d(x, weights['wc1'], biases['bc1'])
-        conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding='SAME')
-        conv1 = tf.nn.relu(conv1)
+        with tf.name_scope('conv1'):
+            conv1 = self.conv2d(x, weights['wc1'], biases['bc1'])
+            conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding='SAME')
+            conv1 = tf.nn.relu(conv1)
 
-        conv2 = self.conv2d(conv1, weights['wc2'], biases['bc2'])
-        conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding="SAME")
-        conv2 = tf.nn.relu(conv2)
+        with tf.name_scope('conv2'):
+            conv2 = self.conv2d(conv1, weights['wc2'], biases['bc2'])
+            conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 1, 1], strides=[1, 2, 1, 1], padding="SAME")
+            conv2 = tf.nn.relu(conv2)
 
-        d_layer1 = weights['wd1'].get_shape().as_list()[0]
-        fc1 = tf.reshape(conv2, [-1, d_layer1])
-        fc1 = tf.add(tf.matmul(fc1, weights['wd1']), biases['bd1'])
-        fc1 = tf.nn.relu(fc1)
-        fc1 = tf.nn.dropout(fc1, dropout)
+        with tf.name_scope('fully_connected'):
+            d_layer1 = weights['wd1'].get_shape().as_list()[0]
+            fc1 = tf.reshape(conv2, [-1, d_layer1])
+            fc1 = tf.add(tf.matmul(fc1, weights['wd1']), biases['bd1'])
+            fc1 = tf.nn.relu(fc1)
+            fc1 = tf.nn.dropout(fc1, dropout)
 
-        out = tf.add(tf.matmul(fc1, weights['out']), biases['out'])
+            out = tf.add(tf.matmul(fc1, weights['out']), biases['out'])
         return out
