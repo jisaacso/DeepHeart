@@ -1,8 +1,9 @@
+import os
+import pickle
 import numpy as np
 from scipy.io import wavfile
 from scipy.fftpack import fft
 from scipy.signal import butter, lfilter
-import os
 from sklearn.preprocessing import normalize
 from sklearn.cross_validation import train_test_split
 from collections import namedtuple
@@ -15,9 +16,6 @@ class PCG:
     challenge](http://physionet.org/challenge/2016). Raw wav files are parsed into
     features, class labels are extracted from header files and data is split into
     training and testing groups.
-
-    The only method to be called after initialization is `get_mini_batch`: a helper
-    function to return small mini batches of training data to TensorFlow.
     """
     def __init__(self, basepath, random_state=42):
         self.basepath = basepath
@@ -34,7 +32,63 @@ class PCG:
 
         self.random_state = random_state
 
+    def initialize_wav_data(self):
+        """
+        Load the original wav files and extract features. Warning, this can take a
+        while due to slow FFTs.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
         self.__load_wav_file()
+        self.__split_train_test()
+        # TODO: check if directory exists
+        self.save("/tmp")
+
+    def save(self, save_path):
+        """
+        Persist the PCG class to disk
+
+        Parameters
+        ----------
+        save_path: str
+            Location on disk to store the parsed PCG metadata
+
+        Returns
+        -------
+        None
+
+        """
+        np.save(os.path.join(save_path, "X.npy"), self.X)
+        np.save(os.path.join(save_path, "y.npy"), self.y)
+        with open( os.path.join(save_path, "meta"), "w") as fout:
+            pickle.dump((self.basepath, self.class_name_to_id, self.nclasses,
+                         self.n_samples, self.random_state), fout)
+
+    def load(self, load_path):
+        """
+        Load a previously stored PCG class.
+
+        Parameters
+        ----------
+        load_path: str
+            Location on disk to load parsed PCG data
+
+        Returns
+        -------
+        None
+
+        """
+        self.X = np.load(os.path.join(load_path, "X.npy"))
+        self.y = np.load(os.path.join(load_path, "y.npy"))
+        with open(os.path.join(load_path, "meta"), "r") as fin:
+            (self.basepath, self.class_name_to_id, self.nclasses,
+             self.n_samples, self.random_state) = pickle.load(fin)
         self.__split_train_test()
 
     def __load_wav_file(self, doFFT=True):
