@@ -31,7 +31,7 @@ To run, set up a virtual environment (ensure python2.7, virtualenv, and
 pip are in your PATH)
 
 ```
->> cd physio
+>> cd deepheart
 >> virtualenv env
 >> source env/bin/activate
 >> pip install -r requirements.txt
@@ -44,11 +44,14 @@ Download the physionet dataset
 >> unzip training.zip
 ```
 
+Install tensorflow from [Tensorflow's site](https://www.tensorflow.org/versions/r0.9/get_started/os_setup.html#pip-installation) 
+(pip install recommended)
+
 Build a feature vector from the raw data and train the CNN
 ```
->> python physio/train_model.py <path_to_physionet_data> <do load previously saved data>
+>> python deepheart/train_model.py <path_to_physionet_data> <do load previously saved data>
 e.g.,
->> python physio/train_model.py training/ f
+>> python deepheart/train_model.py training/ f
 ```
 
 Note: by default this saves tensorboard statistics to /tmp which can
