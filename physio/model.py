@@ -115,7 +115,7 @@ class CNN:
                 avg_cost /= float(self.nbatches)
                 print('Epoch %s\tcost %s' % (epoch, avg_cost))
 
-                if epoch % 2 == 0:
+                if epoch % 10 == 0:
                     acc, sens, spec = sess.run([score, sensitivity, specificity],
                                                 feed_dict={X: self.pcg.test.X,
                                                            y: self.pcg.test.y,
