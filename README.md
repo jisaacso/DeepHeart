@@ -67,3 +67,8 @@ are calculated and logged in tensorboard as well as printed to terminal.
 
 Currently, the tensorflow CNN model converges to a mean score of
  0.78. 
+ 
+# Disclaimer
+This software is not intended for diagnostic purposes. It is only designed
+for the physionet data science competition. All statements have not been evaluated by the FDA. 
+This product is not intended to diagnose, treat, cure, or prevent any disease.
