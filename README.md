@@ -10,7 +10,7 @@
  
  To combat the excessive amount of noise and relatively small sample size, 
  a convolutional neural network is trained using Google's [Tensorflow]
- (github.com/tensorflow/). Tensorflow provides an easy to use interface 
+ (http://github.com/tensorflow/tensorflow). Tensorflow provides an easy to use interface 
  for compiling and efficiently running neural networks. 
  
  Ideally the raw wav files would be fed into a very deep Tensorflow
